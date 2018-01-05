@@ -10,7 +10,6 @@ extern crate serde;
 use parking_lot::Mutex;
 use std::io;
 use futures::{BoxFuture, Future};
-use futures_cpupool::CpuPool;
 use rand::Rng;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -21,6 +20,7 @@ use futures::future::FutureResult;
 use hyper::{Get, Post, StatusCode};
 use hyper::header::ContentLength;
 use hyper::server::{Http, NewService, Request, Response, Service};
+use futures_cpupool::{CpuFuture, CpuPool};
 
 use std::thread;
 use std::time::Duration;
@@ -33,9 +33,7 @@ impl NewService for Server {
     type Error = hyper::Error;
     type Instance = Server;
     fn new_service(&self) -> io::Result<Server> {
-        Ok(Server {
-            hash_map: self.hash_map.clone(),
-        })
+        Ok(self.clone())
     }
 }
 
@@ -44,8 +42,10 @@ struct Message {
     body: String,
 }
 
+#[derive(Clone)]
 struct Server {
     hash_map: Arc<Mutex<VecDeque<(String, oneshot::Sender<String>)>>>,
+    cpu_pool: CpuPool,
 }
 
 use futures::Stream;
@@ -58,21 +58,26 @@ impl Service for Server {
 
     fn call(&self, req: Request) -> Self::Future {
         println!("method: {:?}, path: {:?}, ", req.method(), req.path());
-        let (tx, rx) = oneshot::channel();
-        //println!("-----post --{:?}----", req.slice((1, 100)));
-        let random_id = rand::thread_rng().gen_range(1, 50000);
-        println!("-----call -----{:?}-", random_id);
-        {
-            self.hash_map.lock().push_back((random_id.to_string(), tx));
-        }
+        let map = self.hash_map.clone();
+        self.cpu_pool
+            .spawn_fn(move || {
+                let (tx, rx) = oneshot::channel();
+                //println!("-----post --{:?}----", req.slice((1, 100)));
+                let random_id = rand::thread_rng().gen_range(1, 50000);
+                println!("-----call -----{:?}-", random_id);
+                {
+                    map.lock().push_back((random_id.to_string(), tx));
+                }
 
-        //这个时候已经可以了啊，满足我们的需求了。之前这里有sleep，作为超时，不能这样做，需要用futures类型的超时，才可以！！！！
-        rx.map(|item| {
-            println!("=={:?}==", item);
-            let mut res = Response::new();
-            res.set_body(item);
-            res
-        }).map_err(|_| hyper::Error::Timeout)
+                //这个时候已经可以了啊，满足我们的需求了。之前这里有sleep，作为超时，不能这样做，需要用futures类型的超时，才可以！！！！
+                rx.map(|item| {
+                    println!("=={:?}==", item);
+                    let mut res = Response::new();
+                    res.set_body(item);
+                    res
+                }).map_err(|_| hyper::Error::Timeout)
+                    .boxed()
+            })
             .boxed()
     }
 }
@@ -84,7 +89,7 @@ fn main() {
 
     let _ = thread::spawn(move || {
         while true {
-            thread::sleep(Duration::from_micros(100));
+            thread::sleep(Duration::from_micros(10));
             let mut map = arc_hash_map.lock();
             let map: &mut VecDeque<(String, oneshot::Sender<String>)> = map.deref_mut();
             map.pop_front().map(|(k, v)| {
@@ -94,7 +99,10 @@ fn main() {
         }
     });
 
-    let server = Server { hash_map: hash_map };
+    let server = Server {
+        hash_map: hash_map,
+        cpu_pool: CpuPool::new(4),
+    };
     let server = Http::new().bind(&addr, server).unwrap();
     println!(
         "Listening on http://{} with 1 thread.",
