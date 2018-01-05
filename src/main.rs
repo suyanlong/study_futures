@@ -1,3 +1,4 @@
+#![feature(duration_from_micros)]
 extern crate futures;
 extern crate futures_cpupool;
 extern crate httparse;
@@ -83,7 +84,7 @@ fn main() {
 
     let _ = thread::spawn(move || {
         while true {
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_micros(100));
             let mut map = arc_hash_map.lock();
             let map: &mut VecDeque<(String, oneshot::Sender<String>)> = map.deref_mut();
             map.pop_front().map(|(k, v)| {
