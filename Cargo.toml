@@ -1,0 +1,27 @@
+[package]
+name = "study_future"
+version = "0.1.0"
+authors = ["suyanlong <592938410@qq.com>"]
+
+[dependencies]
+futures = "0.1"
+lazy_static = "0.2"
+tokio-core = "0.1"
+
+
+hyper = "0.11"
+httparse = "1.2.3"
+tokio-proto = "0.1"
+tokio-service = "0.1"
+
+# json
+serde_derive = "1.0"
+serde = "1.0"
+serde_json = "1.0"
+
+# misc support for thread pools, random numbers
+futures-cpupool = "0.1"
+rand = "0.3"
+num_cpus = "1.6.2"
+parking_lot = "0.4.4"
+
